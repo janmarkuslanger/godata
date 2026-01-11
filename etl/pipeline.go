@@ -110,7 +110,8 @@ func (p *Pipeline) Run(ctx context.Context) error {
 	p.hook.OnReadEnd(ctx, info, len(records), err, time.Since(readStart))
 
 	if err != nil {
-		return fmt.Errorf("read failed: %w", err)
+		runErr = fmt.Errorf("read failed: %w", err)
+		return runErr
 	}
 
 	// Transforms sequentially
@@ -125,7 +126,8 @@ func (p *Pipeline) Run(ctx context.Context) error {
 
 			p.hook.OnTransformEnd(ctx, info, step, err, time.Since(stepStart))
 			if err != nil {
-				return fmt.Errorf("transform[%d] failed: %w", step, err)
+				runErr = fmt.Errorf("transform[%d] failed: %w", step, err)
+				return runErr
 			}
 
 			record = updatedRecord
@@ -141,9 +143,9 @@ func (p *Pipeline) Run(ctx context.Context) error {
 
 	p.hook.OnWriteEnd(ctx, info, err, time.Since(writeStart))
 	if err != nil {
-		return fmt.Errorf("write failed: %w", err)
+		runErr = fmt.Errorf("write failed: %w", err)
+		return runErr
 	}
 
-	runErr = nil
 	return nil
 }
