@@ -32,8 +32,7 @@ Local development:
 
 ### Package etl
 
-Purpose:
-- Build pipelines as `Read -> Step* -> Write`.
+Build pipelines as `Read -> Step* -> Write`.
 
 Core data types:
 - `Record`: `map[string]any` data flowing through the pipeline.
@@ -81,8 +80,7 @@ Behavior and errors:
 
 ### Package scheduler
 
-Purpose:
-- Define when the next run should happen.
+Define when the next run should happen.
 
 Core types:
 - `Schedule`: `Next(after time.Time) time.Time` returns the next run time.
@@ -97,8 +95,7 @@ Behavior:
 
 ### Package runner
 
-Purpose:
-- Execute jobs concurrently and keep results in memory.
+Execute jobs concurrently and keep results in memory.
 
 Errors:
 - `ErrRunnerNil`, `ErrJobNil`.
@@ -120,8 +117,7 @@ Behavior:
 
 ### Package orchestrator
 
-Purpose:
-- Register pipelines, schedule them, and persist run metadata.
+Register pipelines, schedule them, and persist run metadata.
 
 Errors:
 - `ErrAlreadyRegistered`, `ErrUnknownPipeline`, `ErrSchedulerRunning`.
