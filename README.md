@@ -95,18 +95,14 @@ Errors:
 Runner:
 - `New() *Runner`: creates a runner.
 - `(*Runner).Start(ctx, job) (Handle, error)`: runs a job asynchronously.
-- `(*Runner).Stop(id string) error`: cancels a running job.
-- `(*Runner).Active() []Result`: returns running jobs.
-- `(*Runner).Result(id string) (Result, bool)`: returns the latest known result.
 
 Run types:
 - `Status`: `running`, `succeeded`, `failed`, `canceled`.
 - `Result`: `ID`, `JobID`, `JobName`, `Status`, `StartedAt`, `EndedAt`, `Err`.
-- `Handle`: `ID`, `JobID`, `JobName`, `StartedAt`, `Done()`, `Result()`.
+- `Handle`: `ID`, `JobID`, `JobName`, `StartedAt`, `Done()`.
 
 Behavior:
 - Runs are independent; overlapping is allowed by default.
-- `Stop` cancels the run context.
 
 ### Package orchestrator
 
@@ -118,13 +114,11 @@ Orchestrator:
 - `(*Orchestrator).Register(ctx, pipeline, schedule) error`: registers a pipeline.
 - `(*Orchestrator).RunPipeline(ctx, name) (runner.Handle, error)`: runs a pipeline now.
 - `(*Orchestrator).StartScheduler(ctx) error`: starts scheduling.
-- `(*Orchestrator).StopScheduler()`: stops scheduling.
 
 Persistence:
-- `Store` interface: `UpsertPipeline`, `GetPipeline`, `ListPipelines`, `UpsertRun`, `GetRun`, `ListRuns`.
+- `Store` interface: `UpsertRun`.
 - `FileStore`: JSON-backed store without external deps.
 - `NewFileStore(path string) *FileStore`: creates a file store.
-- `PipelineRecord`: `Name`, `Enabled`, `UpdatedAt`.
 - `RunRecord`: `ID`, `PipelineName`, `JobID`, `Status`, `StartedAt`, `EndedAt`, `Error`.
 - `RunStatus`: `running`, `succeeded`, `failed`, `canceled`.
 

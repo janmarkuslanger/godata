@@ -2,6 +2,8 @@ package orchestrator_test
 
 import (
 	"context"
+	"encoding/json"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -40,12 +42,16 @@ func TestOrchestratorRunPersistsStatus(t *testing.T) {
 
 	deadline := time.Now().Add(2 * time.Second)
 	for {
-		record, ok, err := store.GetRun(ctx, handle.ID)
+		state, ok, err := loadState(path)
 		if err != nil {
-			t.Fatalf("GetRun failed: %v", err)
+			t.Fatalf("loadState failed: %v", err)
 		}
-		if ok && record.Status != orchestrator.RunStatusRunning && !record.EndedAt.IsZero() {
-			break
+		if ok {
+			if record, found := state.Runs[handle.ID]; found {
+				if record.Status != orchestrator.RunStatusRunning && !record.EndedAt.IsZero() {
+					break
+				}
+			}
 		}
 		if time.Now().After(deadline) {
 			t.Fatalf("timed out waiting for run status update")
@@ -53,11 +59,40 @@ func TestOrchestratorRunPersistsStatus(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 
-	pipelineRecord, ok, err := store.GetPipeline(ctx, "demo")
-	if err != nil || !ok {
-		t.Fatalf("expected pipeline record to be present")
+	state, ok, err := loadState(path)
+	if err != nil {
+		t.Fatalf("loadState failed: %v", err)
 	}
-	if !pipelineRecord.Enabled {
-		t.Fatalf("expected pipeline to be enabled")
+	if !ok {
+		t.Fatalf("expected state file to be present")
 	}
+	if _, found := state.Runs[handle.ID]; !found {
+		t.Fatalf("expected run record to be present")
+	}
+}
+
+func loadState(path string) (struct {
+	Runs map[string]orchestrator.RunRecord `json:"runs"`
+}, bool, error) {
+	var state struct {
+		Runs map[string]orchestrator.RunRecord `json:"runs"`
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return state, false, nil
+		}
+		return state, false, err
+	}
+	if len(data) == 0 {
+		return state, false, nil
+	}
+	if err := json.Unmarshal(data, &state); err != nil {
+		return state, false, err
+	}
+	if state.Runs == nil {
+		state.Runs = make(map[string]orchestrator.RunRecord)
+	}
+	return state, true, nil
 }

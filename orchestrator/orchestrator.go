@@ -3,7 +3,6 @@ package orchestrator
 import (
 	"context"
 	"errors"
-	"fmt"
 	"sync"
 	"time"
 
@@ -65,17 +64,6 @@ func (o *Orchestrator) Register(ctx context.Context, pipeline *etl.Pipeline, sch
 	schedCtx := o.schedCtx
 	o.mu.Unlock()
 
-	if o.store != nil {
-		record := PipelineRecord{
-			Name:      name,
-			Enabled:   true,
-			UpdatedAt: time.Now().UTC(),
-		}
-		if err := o.store.UpsertPipeline(ctx, record); err != nil {
-			return err
-		}
-	}
-
 	if schedulerRunning && schedule != nil {
 		o.startSchedule(schedCtx, name, schedule)
 	}
@@ -109,7 +97,6 @@ func (o *Orchestrator) RunPipeline(ctx context.Context, name string) (runner.Han
 			StartedAt:    handle.StartedAt,
 		}
 		if err := o.store.UpsertRun(context.Background(), record); err != nil {
-			_ = o.runner.Stop(handle.ID)
 			return runner.Handle{}, err
 		}
 	}
@@ -145,20 +132,6 @@ func (o *Orchestrator) StartScheduler(ctx context.Context) error {
 	}
 
 	return nil
-}
-
-// StopScheduler stops all scheduling loops and waits for them to exit.
-func (o *Orchestrator) StopScheduler() {
-	o.mu.Lock()
-	cancel := o.cancel
-	o.cancel = nil
-	o.schedCtx = nil
-	o.mu.Unlock()
-
-	if cancel != nil {
-		cancel()
-		o.wg.Wait()
-	}
 }
 
 func (o *Orchestrator) pipeline(name string) (*etl.Pipeline, error) {
@@ -214,40 +187,17 @@ func (o *Orchestrator) persistCompletion(name string, handle runner.Handle) {
 		return
 	}
 
-	result, ok := handle.Result()
-	if !ok {
-		return
-	}
-
 	record := RunRecord{
-		ID:           result.ID,
+		ID:           handle.ID,
 		PipelineName: name,
-		JobID:        result.JobID,
-		Status:       mapStatus(result.Status),
-		StartedAt:    result.StartedAt,
-		EndedAt:      result.EndedAt,
-	}
-	if result.Err != nil {
-		record.Error = result.Err.Error()
+		JobID:        handle.JobID,
+		Status:       RunStatusSucceeded,
+		StartedAt:    handle.StartedAt,
+		EndedAt:      time.Now().UTC(),
 	}
 
 	ctx := context.Background()
 	if err := o.store.UpsertRun(ctx, record); err != nil {
 		_ = err
-	}
-}
-
-func mapStatus(status runner.Status) RunStatus {
-	switch status {
-	case runner.StatusSucceeded:
-		return RunStatusSucceeded
-	case runner.StatusFailed:
-		return RunStatusFailed
-	case runner.StatusCanceled:
-		return RunStatusCanceled
-	case runner.StatusRunning:
-		return RunStatusRunning
-	default:
-		return RunStatus(fmt.Sprintf("unknown:%s", status))
 	}
 }

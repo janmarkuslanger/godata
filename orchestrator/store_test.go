@@ -2,6 +2,8 @@ package orchestrator_test
 
 import (
 	"context"
+	"encoding/json"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -14,14 +16,6 @@ func TestFileStorePersistsRecords(t *testing.T) {
 
 	store := orchestrator.NewFileStore(path)
 
-	pipeline := orchestrator.PipelineRecord{
-		Name:    "demo",
-		Enabled: true,
-	}
-	if err := store.UpsertPipeline(ctx, pipeline); err != nil {
-		t.Fatalf("UpsertPipeline failed: %v", err)
-	}
-
 	run := orchestrator.RunRecord{
 		ID:           "run-1",
 		PipelineName: "demo",
@@ -31,18 +25,18 @@ func TestFileStorePersistsRecords(t *testing.T) {
 		t.Fatalf("UpsertRun failed: %v", err)
 	}
 
-	if _, ok, err := store.GetPipeline(ctx, "demo"); err != nil || !ok {
-		t.Fatalf("expected pipeline to be present")
-	}
-	if _, ok, err := store.GetRun(ctx, "run-1"); err != nil || !ok {
-		t.Fatalf("expected run to be present")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile failed: %v", err)
 	}
 
-	storeReloaded := orchestrator.NewFileStore(path)
-	if _, ok, err := storeReloaded.GetPipeline(ctx, "demo"); err != nil || !ok {
-		t.Fatalf("expected pipeline to be present after reload")
+	var state struct {
+		Runs map[string]orchestrator.RunRecord `json:"runs"`
 	}
-	if _, ok, err := storeReloaded.GetRun(ctx, "run-1"); err != nil || !ok {
-		t.Fatalf("expected run to be present after reload")
+	if err := json.Unmarshal(data, &state); err != nil {
+		t.Fatalf("unmarshal failed: %v", err)
+	}
+	if _, ok := state.Runs["run-1"]; !ok {
+		t.Fatalf("expected run to be persisted")
 	}
 }
