@@ -18,6 +18,9 @@ Using the module in another project:
 ## Packages
 
 - `etl`: simple ETL-style pipeline (Read -> Step* -> Write)
+- `scheduler`: schedule definitions (e.g. fixed intervals).
+- `runner`: concurrent job execution with status tracking.
+- `orchestrator`: wiring of pipelines + schedules + persistence.
 
 ## API
 
@@ -60,6 +63,48 @@ Error behavior:
 - step errors are wrapped as `step[N] failed: ...`
 - write errors are wrapped as `write failed: ...`
 
+### Package scheduler
+
+Core types:
+- `Schedule`: `Next(after time.Time) time.Time` decides the next run time.
+
+Schedules:
+- `Interval`: fixed-duration schedule.
+- `Every(d time.Duration) Interval`: helper to build an interval schedule.
+
+### Package runner
+
+Runner:
+- `New() *Runner`: creates a runner.
+- `(*Runner).Start(ctx, job) (Handle, error)`: runs a job asynchronously.
+- `(*Runner).Stop(id string) error`: cancels a running job.
+- `(*Runner).Active() []Result`: returns running jobs.
+- `(*Runner).Result(id string) (Result, bool)`: returns the latest known result.
+
+Run types:
+- `Status`: `running`, `succeeded`, `failed`, `canceled`.
+- `Result`: `ID`, `JobID`, `JobName`, `Status`, `StartedAt`, `EndedAt`, `Err`.
+- `Handle`: `ID`, `JobID`, `JobName`, `StartedAt`, `Done()`, `Result()`.
+
+Runner behavior:
+- runs are independent; overlapping is allowed by default.
+
+### Package orchestrator
+
+Orchestrator:
+- `New(store, runner) *Orchestrator`: creates an orchestrator.
+- `(*Orchestrator).Register(ctx, pipeline, schedule) error`: registers a pipeline.
+- `(*Orchestrator).RunPipeline(ctx, name) (runner.Handle, error)`: runs a pipeline now.
+- `(*Orchestrator).StartScheduler(ctx) error`: starts scheduling.
+- `(*Orchestrator).StopScheduler()`: stops scheduling.
+- `(*Orchestrator).SetPipelineEnabled(ctx, name, enabled) error`: toggle scheduling.
+
+Persistence:
+- `Store` interface persists pipelines and runs.
+- `FileStore`: JSON-backed store without external deps.
+- `PipelineRecord`: `Name`, `Enabled`, `UpdatedAt`.
+- `RunRecord`: `ID`, `PipelineName`, `JobID`, `Status`, `StartedAt`, `EndedAt`, `Error`.
+
 ## Example (package etl)
 
 ```go
@@ -93,6 +138,33 @@ func main() {
 		})
 
 	_ = p.Run(context.Background())
+}
+```
+
+## Example (scheduler + runner + orchestrator)
+
+```go
+package main
+
+import (
+	"context"
+	"time"
+
+	"github.com/janmarkuslanger/godata/etl"
+	"github.com/janmarkuslanger/godata/orchestrator"
+	"github.com/janmarkuslanger/godata/scheduler"
+)
+
+func main() {
+	store := orchestrator.NewFileStore("state.json")
+	orch := orchestrator.New(store, nil)
+
+	pipeline := etl.New("demo").
+		Read(func(ctx context.Context) ([]etl.Record, error) { return nil, nil }).
+		Write(func(ctx context.Context, records []etl.Record) error { return nil })
+
+	_ = orch.Register(context.Background(), pipeline, scheduler.Every(5*time.Minute))
+	_ = orch.StartScheduler(context.Background())
 }
 ```
 
