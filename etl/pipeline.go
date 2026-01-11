@@ -1,6 +1,10 @@
 package etl
 
-import "context"
+import (
+	"context"
+	"errors"
+	"fmt"
+)
 
 // Record is the data structure folowing through the pipeline
 type Record map[string]any
@@ -48,4 +52,59 @@ func (p *Pipeline) Transform(transform Transform) *Pipeline {
 func (p *Pipeline) Write(writer Writer) *Pipeline {
 	p.writer = writer
 	return p
+}
+
+// validate checks for pipxeline correctness
+func (p *Pipeline) validate() error {
+	if p == nil {
+		return errors.New("pipeline is nil")
+	}
+
+	if p.name == "" {
+		return errors.New("pipeline name must not be empty")
+	}
+
+	if p.reader == nil {
+		return errors.New("reader must be set via Read")
+	}
+
+	if p.writer == nil {
+		return errors.New("writer must be set via Write")
+	}
+
+	return nil
+}
+
+// Run executes the pipeline
+func (p *Pipeline) Run(ctx context.Context) error {
+	if err := p.validate(); err != nil {
+		return err
+	}
+
+	records, err := p.reader(ctx)
+	if err != nil {
+		return fmt.Errorf("read failed: %w", err)
+	}
+
+	// Transforms sequentially
+	for i := range records {
+		record := records[i]
+
+		for step, transform := range p.transforms {
+			updatedRecord, err := transform(ctx, record)
+			if err != nil {
+				return fmt.Errorf("transform[%d] failed: %w", step, err)
+			}
+
+			record = updatedRecord
+		}
+
+		records[i] = record
+	}
+
+	if err := p.writer(ctx, records); err != nil {
+		return fmt.Errorf("write failed: %w", err)
+	}
+
+	return nil
 }
