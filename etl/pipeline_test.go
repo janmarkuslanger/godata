@@ -1,15 +1,16 @@
-package etl
+package etl_test
 
 import (
 	"context"
 	"errors"
+	"github.com/janmarkuslanger/godata/etl"
 	"reflect"
 	"strings"
 	"testing"
 )
 
 func TestPipelineName(t *testing.T) {
-	pipeline := New("demo")
+	pipeline := etl.New("demo")
 	if pipeline.Name() != "demo" {
 		t.Fatalf("expected name 'demo', got %q", pipeline.Name())
 	}
@@ -18,25 +19,25 @@ func TestPipelineName(t *testing.T) {
 func TestPipelineRunSuccess(t *testing.T) {
 	ctx := context.Background()
 
-	var got []Record
+	var got []etl.Record
 	writerCalls := 0
 
-	pipeline := New("numbers").
-		Read(func(ctx context.Context) ([]Record, error) {
-			return []Record{
+	pipeline := etl.New("numbers").
+		Read(func(ctx context.Context) ([]etl.Record, error) {
+			return []etl.Record{
 				{"value": 1},
 				{"value": 2},
 			}, nil
 		}).
-		Transform(func(ctx context.Context, record Record) (Record, error) {
+		Transform(func(ctx context.Context, record etl.Record) (etl.Record, error) {
 			record["value"] = record["value"].(int) + 1
 			return record, nil
 		}).
-		Transform(func(ctx context.Context, record Record) (Record, error) {
+		Transform(func(ctx context.Context, record etl.Record) (etl.Record, error) {
 			record["value"] = record["value"].(int) * 2
 			return record, nil
 		}).
-		Write(func(ctx context.Context, records []Record) error {
+		Write(func(ctx context.Context, records []etl.Record) error {
 			writerCalls++
 			got = append(got, records...)
 			return nil
@@ -50,7 +51,7 @@ func TestPipelineRunSuccess(t *testing.T) {
 		t.Fatalf("expected writer to be called once, got %d", writerCalls)
 	}
 
-	want := []Record{
+	want := []etl.Record{
 		{"value": 4},
 		{"value": 6},
 	}
@@ -64,38 +65,38 @@ func TestPipelineRunValidation(t *testing.T) {
 
 	tests := []struct {
 		name    string
-		build   func() *Pipeline
+		build   func() *etl.Pipeline
 		wantErr string
 	}{
 		{
 			name: "nil pipeline",
-			build: func() *Pipeline {
+			build: func() *etl.Pipeline {
 				return nil
 			},
 			wantErr: "pipeline is nil",
 		},
 		{
 			name: "missing name",
-			build: func() *Pipeline {
-				return New("").
-					Read(func(ctx context.Context) ([]Record, error) { return nil, nil }).
-					Write(func(ctx context.Context, records []Record) error { return nil })
+			build: func() *etl.Pipeline {
+				return etl.New("").
+					Read(func(ctx context.Context) ([]etl.Record, error) { return nil, nil }).
+					Write(func(ctx context.Context, records []etl.Record) error { return nil })
 			},
 			wantErr: "pipeline name must not be empty",
 		},
 		{
 			name: "missing reader",
-			build: func() *Pipeline {
-				return New("demo").
-					Write(func(ctx context.Context, records []Record) error { return nil })
+			build: func() *etl.Pipeline {
+				return etl.New("demo").
+					Write(func(ctx context.Context, records []etl.Record) error { return nil })
 			},
 			wantErr: "reader must be set via Read",
 		},
 		{
 			name: "missing writer",
-			build: func() *Pipeline {
-				return New("demo").
-					Read(func(ctx context.Context) ([]Record, error) { return nil, nil })
+			build: func() *etl.Pipeline {
+				return etl.New("demo").
+					Read(func(ctx context.Context) ([]etl.Record, error) { return nil, nil })
 			},
 			wantErr: "writer must be set via Write",
 		},
@@ -120,9 +121,9 @@ func TestPipelineRunErrors(t *testing.T) {
 
 	t.Run("read error", func(t *testing.T) {
 		readErr := errors.New("read broke")
-		pipeline := New("demo").
-			Read(func(ctx context.Context) ([]Record, error) { return nil, readErr }).
-			Write(func(ctx context.Context, records []Record) error { return nil })
+		pipeline := etl.New("demo").
+			Read(func(ctx context.Context) ([]etl.Record, error) { return nil, readErr }).
+			Write(func(ctx context.Context, records []etl.Record) error { return nil })
 
 		err := pipeline.Run(ctx)
 		if err == nil {
@@ -138,10 +139,10 @@ func TestPipelineRunErrors(t *testing.T) {
 
 	t.Run("transform error", func(t *testing.T) {
 		transformErr := errors.New("transform broke")
-		pipeline := New("demo").
-			Read(func(ctx context.Context) ([]Record, error) { return []Record{{"value": 1}}, nil }).
-			Transform(func(ctx context.Context, record Record) (Record, error) { return nil, transformErr }).
-			Write(func(ctx context.Context, records []Record) error { return nil })
+		pipeline := etl.New("demo").
+			Read(func(ctx context.Context) ([]etl.Record, error) { return []etl.Record{{"value": 1}}, nil }).
+			Transform(func(ctx context.Context, record etl.Record) (etl.Record, error) { return nil, transformErr }).
+			Write(func(ctx context.Context, records []etl.Record) error { return nil })
 
 		err := pipeline.Run(ctx)
 		if err == nil {
@@ -157,9 +158,9 @@ func TestPipelineRunErrors(t *testing.T) {
 
 	t.Run("write error", func(t *testing.T) {
 		writeErr := errors.New("write broke")
-		pipeline := New("demo").
-			Read(func(ctx context.Context) ([]Record, error) { return []Record{{"value": 1}}, nil }).
-			Write(func(ctx context.Context, records []Record) error { return writeErr })
+		pipeline := etl.New("demo").
+			Read(func(ctx context.Context) ([]etl.Record, error) { return []etl.Record{{"value": 1}}, nil }).
+			Write(func(ctx context.Context, records []etl.Record) error { return writeErr })
 
 		err := pipeline.Run(ctx)
 		if err == nil {
