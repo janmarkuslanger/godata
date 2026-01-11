@@ -26,7 +26,6 @@ type Orchestrator struct {
 	mu        sync.Mutex
 	pipelines map[string]*etl.Pipeline
 	schedules map[string]scheduler.Schedule
-	enabled   map[string]bool
 	schedCtx  context.Context
 	cancel    context.CancelFunc
 	wg        sync.WaitGroup
@@ -42,7 +41,6 @@ func New(store Store, runnerInstance *runner.Runner) *Orchestrator {
 		runner:    runnerInstance,
 		pipelines: make(map[string]*etl.Pipeline),
 		schedules: make(map[string]scheduler.Schedule),
-		enabled:   make(map[string]bool),
 	}
 }
 
@@ -56,17 +54,6 @@ func (o *Orchestrator) Register(ctx context.Context, pipeline *etl.Pipeline, sch
 		return errors.New("pipeline name is required")
 	}
 
-	enabled := true
-	if o.store != nil {
-		record, ok, err := o.store.GetPipeline(ctx, name)
-		if err != nil {
-			return err
-		}
-		if ok {
-			enabled = record.Enabled
-		}
-	}
-
 	o.mu.Lock()
 	if _, exists := o.pipelines[name]; exists {
 		o.mu.Unlock()
@@ -74,7 +61,6 @@ func (o *Orchestrator) Register(ctx context.Context, pipeline *etl.Pipeline, sch
 	}
 	o.pipelines[name] = pipeline
 	o.schedules[name] = schedule
-	o.enabled[name] = enabled
 	schedulerRunning := o.cancel != nil
 	schedCtx := o.schedCtx
 	o.mu.Unlock()
@@ -82,7 +68,7 @@ func (o *Orchestrator) Register(ctx context.Context, pipeline *etl.Pipeline, sch
 	if o.store != nil {
 		record := PipelineRecord{
 			Name:      name,
-			Enabled:   enabled,
+			Enabled:   true,
 			UpdatedAt: time.Now().UTC(),
 		}
 		if err := o.store.UpsertPipeline(ctx, record); err != nil {
@@ -92,28 +78,6 @@ func (o *Orchestrator) Register(ctx context.Context, pipeline *etl.Pipeline, sch
 
 	if schedulerRunning && schedule != nil {
 		o.startSchedule(schedCtx, name, schedule)
-	}
-
-	return nil
-}
-
-// SetPipelineEnabled enables or disables a pipeline for scheduling.
-func (o *Orchestrator) SetPipelineEnabled(ctx context.Context, name string, enabled bool) error {
-	o.mu.Lock()
-	if _, ok := o.pipelines[name]; !ok {
-		o.mu.Unlock()
-		return ErrUnknownPipeline
-	}
-	o.enabled[name] = enabled
-	o.mu.Unlock()
-
-	if o.store != nil {
-		record := PipelineRecord{
-			Name:      name,
-			Enabled:   enabled,
-			UpdatedAt: time.Now().UTC(),
-		}
-		return o.store.UpsertPipeline(ctx, record)
 	}
 
 	return nil
@@ -235,24 +199,12 @@ func (o *Orchestrator) runSchedule(ctx context.Context, name string, schedule sc
 		case <-timer.C:
 		}
 
-		if o.isEnabled(name) {
-			if _, err := o.RunPipeline(context.Background(), name); err != nil {
-				_ = err
-			}
+		if _, err := o.RunPipeline(context.Background(), name); err != nil {
+			_ = err
 		}
 
 		last = next
 	}
-}
-
-func (o *Orchestrator) isEnabled(name string) bool {
-	o.mu.Lock()
-	enabled, ok := o.enabled[name]
-	o.mu.Unlock()
-	if !ok {
-		return true
-	}
-	return enabled
 }
 
 func (o *Orchestrator) persistCompletion(name string, handle runner.Handle) {
@@ -281,9 +233,6 @@ func (o *Orchestrator) persistCompletion(name string, handle runner.Handle) {
 
 	ctx := context.Background()
 	if err := o.store.UpsertRun(ctx, record); err != nil {
-		_ = err
-	}
-	if err := o.store.UpsertPipeline(ctx, PipelineRecord{Name: name, Enabled: o.isEnabled(name), UpdatedAt: time.Now().UTC()}); err != nil {
 		_ = err
 	}
 }

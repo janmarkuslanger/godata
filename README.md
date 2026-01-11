@@ -119,7 +119,6 @@ Orchestrator:
 - `(*Orchestrator).RunPipeline(ctx, name) (runner.Handle, error)`: runs a pipeline now.
 - `(*Orchestrator).StartScheduler(ctx) error`: starts scheduling.
 - `(*Orchestrator).StopScheduler()`: stops scheduling.
-- `(*Orchestrator).SetPipelineEnabled(ctx, name, enabled) error`: toggle scheduling.
 
 Persistence:
 - `Store` interface: `UpsertPipeline`, `GetPipeline`, `ListPipelines`, `UpsertRun`, `GetRun`, `ListRuns`.
