@@ -33,6 +33,9 @@ func TestPipelineRunSuccess(t *testing.T) {
 			record["value"] = record["value"].(int) + 1
 			return record, nil
 		}).
+		Filter(func(ctx context.Context, record etl.Record) (bool, error) {
+			return record["value"].(int)%2 == 0, nil
+		}).
 		Transform(func(ctx context.Context, record etl.Record) (etl.Record, error) {
 			record["value"] = record["value"].(int) * 2
 			return record, nil
@@ -53,7 +56,6 @@ func TestPipelineRunSuccess(t *testing.T) {
 
 	want := []etl.Record{
 		{"value": 4},
-		{"value": 6},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("unexpected records: %#v", got)
@@ -137,22 +139,22 @@ func TestPipelineRunErrors(t *testing.T) {
 		}
 	})
 
-	t.Run("transform error", func(t *testing.T) {
-		transformErr := errors.New("transform broke")
+	t.Run("step error", func(t *testing.T) {
+		stepErr := errors.New("transform broke")
 		pipeline := etl.New("demo").
 			Read(func(ctx context.Context) ([]etl.Record, error) { return []etl.Record{{"value": 1}}, nil }).
-			Transform(func(ctx context.Context, record etl.Record) (etl.Record, error) { return nil, transformErr }).
+			Transform(func(ctx context.Context, record etl.Record) (etl.Record, error) { return nil, stepErr }).
 			Write(func(ctx context.Context, records []etl.Record) error { return nil })
 
 		err := pipeline.Run(ctx)
 		if err == nil {
 			t.Fatalf("expected error, got nil")
 		}
-		if !errors.Is(err, transformErr) {
+		if !errors.Is(err, stepErr) {
 			t.Fatalf("expected wrapped error, got %v", err)
 		}
-		if !strings.Contains(err.Error(), "transform[0] failed") {
-			t.Fatalf("expected transform prefix, got %q", err.Error())
+		if !strings.Contains(err.Error(), "step[0] failed") {
+			t.Fatalf("expected step prefix, got %q", err.Error())
 		}
 	})
 

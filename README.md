@@ -17,7 +17,7 @@ Using the module in another project:
 
 ## Packages
 
-- `etl`: simple ETL-style pipeline (Read -> Transform* -> Write)
+- `etl`: simple ETL-style pipeline (Read -> Step* -> Write)
 
 ## API
 
@@ -27,6 +27,7 @@ Core types:
 - `Record`: `map[string]any` flowing through the pipeline.
 - `Reader`: `func(ctx context.Context) ([]Record, error)` reads a batch.
 - `Transform`: `func(ctx context.Context, record Record) (Record, error)` transforms a record.
+- `Predicate`: `func(ctx context.Context, record Record) (bool, error)` decides if a record continues.
 - `Writer`: `func(ctx context.Context, records []Record) error` writes a batch.
 
 Pipeline builder:
@@ -34,9 +35,13 @@ Pipeline builder:
 - `(*Pipeline).Name() string`: returns the name.
 - `(*Pipeline).Read(reader Reader) *Pipeline`: sets the reader.
 - `(*Pipeline).Transform(transform Transform) *Pipeline`: appends a transform.
+- `(*Pipeline).Filter(predicate Predicate) *Pipeline`: appends a filter.
 - `(*Pipeline).Write(writer Writer) *Pipeline`: sets the writer.
 - `(*Pipeline).Hook(hook PipelineHook) *Pipeline`: sets pipeline hooks (nil uses Noop).
 - `(*Pipeline).Run(ctx context.Context) error`: executes the pipeline.
+
+Step behavior:
+- steps run in order; filters may drop records and skip remaining steps.
 
 Jobs:
 - `NewJob(pipeline *Pipeline) (*Job, error)`: creates a job for a pipeline.
@@ -46,13 +51,13 @@ Jobs:
 - `Job` fields: `ID`, `Name`, `StartedAt`, `EndedAt`, `Err`.
 
 Hooks:
-- `PipelineHook`: lifecycle events for pipeline, read/transform/write steps.
+- `PipelineHook`: lifecycle events for pipeline, read/step/write stages.
 - `JobHook`: lifecycle events for job start/end.
 - `NoopPipelineHook` and `NoopJobHook` are provided for embedding.
 
 Error behavior:
 - read errors are wrapped as `read failed: ...`
-- transform errors are wrapped as `transform[N] failed: ...`
+- step errors are wrapped as `step[N] failed: ...`
 - write errors are wrapped as `write failed: ...`
 
 ## Example (package etl)
@@ -79,12 +84,15 @@ func main() {
 			record["value"] = record["value"].(int) * 2
 			return record, nil
 		}).
+		Filter(func(ctx context.Context, record etl.Record) (bool, error) {
+			return record["value"].(int) > 2, nil
+		}).
 		Write(func(ctx context.Context, records []etl.Record) error {
 			fmt.Println(records)
 			return nil
 		})
 
-_ = p.Run(context.Background())
+	_ = p.Run(context.Background())
 }
 ```
 

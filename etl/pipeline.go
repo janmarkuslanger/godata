@@ -19,7 +19,7 @@ type Transform func(ctx context.Context, record Record) (Record, error)
 // Writer writes the resulting records
 type Writer func(ctx context.Context, records []Record) error
 
-// Pipeline defines a data pipeline: Read -> Transform* -> Write
+// Pipeline defines a data pipeline: Read -> Step* -> Write
 type Pipeline struct {
 	name   string
 	reader Reader
