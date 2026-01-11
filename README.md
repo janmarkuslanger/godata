@@ -32,70 +32,81 @@ Local development:
 
 ### Package etl
 
-Types:
-- `Record`: `map[string]any` flowing through the pipeline.
+Purpose:
+- Build pipelines as `Read -> Step* -> Write`.
+
+Core data types:
+- `Record`: `map[string]any` data flowing through the pipeline.
 - `Reader`: `func(ctx context.Context) ([]Record, error)` reads a batch.
-- `Transform`: `func(ctx context.Context, record Record) (Record, error)` transforms a record.
-- `Predicate`: `func(ctx context.Context, record Record) (bool, error)` decides if a record continues.
+- `Transform`: `func(ctx context.Context, record Record) (Record, error)` updates a record.
+- `Predicate`: `func(ctx context.Context, record Record) (bool, error)` keeps or drops a record.
 - `Writer`: `func(ctx context.Context, records []Record) error` writes a batch.
 
-Pipeline:
-- `New(name string) *Pipeline`: creates a pipeline with a name.
-- `(*Pipeline).Name() string`: returns the name.
-- `(*Pipeline).Read(reader Reader) *Pipeline`: sets the reader.
-- `(*Pipeline).Transform(transform Transform) *Pipeline`: appends a transform step.
-- `(*Pipeline).Filter(predicate Predicate) *Pipeline`: appends a filter step.
-- `(*Pipeline).Write(writer Writer) *Pipeline`: sets the writer.
-- `(*Pipeline).Hook(hook PipelineHook) *Pipeline`: sets pipeline hooks (nil uses `NoopPipelineHook`).
-- `(*Pipeline).Run(ctx context.Context) error`: executes the pipeline.
+Pipeline builder:
+- `New(name string) *Pipeline`: creates a pipeline; `name` must be non-empty.
+- `(*Pipeline).Name() string`: returns the pipeline name.
+- `(*Pipeline).Read(reader Reader) *Pipeline`: sets the reader; required before `Run`.
+- `(*Pipeline).Transform(transform Transform) *Pipeline`: adds a transform step; runs in order.
+- `(*Pipeline).Filter(predicate Predicate) *Pipeline`: adds a filter step; `false` drops the record.
+- `(*Pipeline).Write(writer Writer) *Pipeline`: sets the writer; required before `Run`.
+- `(*Pipeline).Hook(hook PipelineHook) *Pipeline`: sets hooks; nil uses `NoopPipelineHook`.
+- `(*Pipeline).Run(ctx context.Context) error`: validates, reads, applies steps, writes; returns wrapped errors.
 
 Job:
-- `NewJob(pipeline *Pipeline) (*Job, error)`: creates a job for a pipeline.
-- `(*Job).Hook(hook JobHook) *Job`: sets job hooks (nil uses `NoopJobHook`).
-- `(*Job).Run(ctx context.Context) error`: runs the job and stores timestamps/errors.
-- `(*Job).Duration() time.Duration`: returns the runtime based on start/end.
-- `Job` fields: `ID`, `Pipeline`, `Name`, `StartedAt`, `EndedAt`, `Err`.
+- `NewJob(pipeline *Pipeline) (*Job, error)`: creates a job; error if pipeline is nil.
+- `(*Job).Hook(hook JobHook) *Job`: sets hooks; nil uses `NoopJobHook`.
+- `(*Job).Run(ctx context.Context) error`: runs the pipeline; sets `StartedAt`, `EndedAt`, `Err`.
+- `(*Job).Duration() time.Duration`: 0 if not started; otherwise elapsed.
+- `Job` fields: `ID` (random), `Pipeline` (pointer), `Name` (pipeline name), `StartedAt`, `EndedAt`, `Err`.
 
-Hooks:
+Hooks and info:
 - `PipelineInfo`: `PipelineName`.
-- `PipelineHook`:
-  - `OnPipelineStart(ctx, info)`
-  - `OnPipelineEnd(ctx, info, err, dur)`
-  - `OnReadStart(ctx, info)`
-  - `OnReadEnd(ctx, info, records, err, dur)`
-  - `OnStepStart(ctx, info, step)`
-  - `OnStepEnd(ctx, info, step, err, dur)`
-  - `OnWriteStart(ctx, info, records)`
-  - `OnWriteEnd(ctx, info, err, dur)`
-- `NoopPipelineHook`: empty implementation for embedding.
 - `JobInfo`: `JobID`, `PipelineName`.
-- `JobHook`:
-  - `OnJobStart(ctx, info)`
-  - `OnJobEnd(ctx, info, err, dur)`
-- `NoopJobHook`: empty implementation for embedding.
+- `PipelineHook.OnPipelineStart(ctx, info)`: called once before reading.
+- `PipelineHook.OnPipelineEnd(ctx, info, err, dur)`: called once after completion.
+- `PipelineHook.OnReadStart(ctx, info)`: before the reader runs.
+- `PipelineHook.OnReadEnd(ctx, info, records, err, dur)`: after the reader finishes.
+- `PipelineHook.OnStepStart(ctx, info, step)`: before each step.
+- `PipelineHook.OnStepEnd(ctx, info, step, err, dur)`: after each step.
+- `PipelineHook.OnWriteStart(ctx, info, records)`: before the writer runs.
+- `PipelineHook.OnWriteEnd(ctx, info, err, dur)`: after the writer finishes.
+- `JobHook.OnJobStart(ctx, info)`: called once before the job runs.
+- `JobHook.OnJobEnd(ctx, info, err, dur)`: called once after the job finishes.
+- `NoopPipelineHook`, `NoopJobHook` are provided for embedding.
 
-Behavior:
-- Steps run in order; filters may drop records and skip remaining steps.
+Behavior and errors:
+- Steps run sequentially for each record; filters may drop records and skip remaining steps.
 - Errors are wrapped as `read failed: ...`, `step[N] failed: ...`, `write failed: ...`.
+- Hooks receive per-stage durations and record counts.
 
 ### Package scheduler
 
-Types:
-- `Schedule`: `Next(after time.Time) time.Time` decides the next run time.
+Purpose:
+- Define when the next run should happen.
+
+Core types:
+- `Schedule`: `Next(after time.Time) time.Time` returns the next run time.
 
 Schedules:
 - `Interval`: fixed-duration schedule.
 - `Every(d time.Duration) Interval`: helper to build an interval schedule.
 
+Behavior:
+- `Interval.Next` returns `time.Time{}` when `Every <= 0`.
+- Returning `time.Time{}` from `Next` stops scheduling.
+
 ### Package runner
+
+Purpose:
+- Execute jobs concurrently and keep results in memory.
 
 Errors:
 - `ErrRunnerNil`, `ErrJobNil`.
 
 Runner:
 - `New() *Runner`: creates a runner.
-- `(*Runner).Start(ctx, job) (Handle, error)`: runs a job asynchronously.
-- `(*Runner).Result(id string) (Result, bool)`: returns the result for a completed run.
+- `(*Runner).Start(ctx, job) (Handle, error)`: starts a job in a goroutine.
+- `(*Runner).Result(id string) (Result, bool)`: returns a completed result; `ok=false` if not found or still running.
 
 Run types:
 - `Status`: `running`, `succeeded`, `failed`, `canceled`.
@@ -104,24 +115,35 @@ Run types:
 
 Behavior:
 - Runs are independent; overlapping is allowed by default.
+- `StatusCanceled` is used for context cancellation or deadline.
+- Results remain in memory for the lifetime of the runner.
 
 ### Package orchestrator
+
+Purpose:
+- Register pipelines, schedule them, and persist run metadata.
 
 Errors:
 - `ErrAlreadyRegistered`, `ErrUnknownPipeline`, `ErrSchedulerRunning`.
 
 Orchestrator:
-- `New(store, runner) *Orchestrator`: creates an orchestrator.
-- `(*Orchestrator).Register(ctx, pipeline, schedule) error`: registers a pipeline.
-- `(*Orchestrator).RunPipeline(ctx, name) (runner.Handle, error)`: runs a pipeline now.
-- `(*Orchestrator).StartScheduler(ctx) error`: starts scheduling.
+- `New(store, runner) *Orchestrator`: creates an orchestrator; `runner` can be nil to use a default.
+- `(*Orchestrator).Register(ctx, pipeline, schedule) error`: registers by pipeline name; error if nil or duplicate.
+- `(*Orchestrator).RunPipeline(ctx, name) (runner.Handle, error)`: runs immediately; returns handle.
+- `(*Orchestrator).StartScheduler(ctx) error`: starts scheduling all registered pipelines; cancel the context to stop.
 
 Persistence:
 - `Store` interface: `UpsertRun`.
 - `FileStore`: JSON-backed store without external deps.
-- `NewFileStore(path string) *FileStore`: creates a file store.
+- `NewFileStore(path string) *FileStore`
 - `RunRecord`: `ID`, `PipelineName`, `JobID`, `Status`, `StartedAt`, `EndedAt`, `Error`.
 - `RunStatus`: `running`, `succeeded`, `failed`, `canceled`.
+
+Behavior:
+- `Register` stores a schedule; if the scheduler is already running, the schedule starts immediately.
+- `RunPipeline` persists `running` immediately and updates the final status on completion.
+- Passing `nil` as `Store` disables persistence.
+- `FileStore` uses run IDs as keys; upserts overwrite previous entries.
 
 ## Deployment
 
