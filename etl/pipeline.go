@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 )
 
 // Record is the data structure folowing through the pipeline
@@ -24,11 +25,13 @@ type Pipeline struct {
 	reader     Reader
 	transforms []Transform
 	writer     Writer
+
+	hook PipelineHook
 }
 
 // New create a new pipeline
 func New(name string) *Pipeline {
-	return &Pipeline{name: name}
+	return &Pipeline{name: name, hook: NoopPipelineHook{}}
 }
 
 // Name returns the name of the pipeline
@@ -75,13 +78,37 @@ func (p *Pipeline) validate() error {
 	return nil
 }
 
+// Hooks sets the hook
+func (p *Pipeline) Hook(hook PipelineHook) *Pipeline {
+	if hook == nil {
+		p.hook = NoopPipelineHook{}
+		return p
+	}
+	p.hook = hook
+	return p
+}
+
 // Run executes the pipeline
 func (p *Pipeline) Run(ctx context.Context) error {
 	if err := p.validate(); err != nil {
 		return err
 	}
 
+	info := PipelineInfo{PipelineName: p.name}
+	pipelineStart := time.Now()
+	p.hook.OnPipelineStart(ctx, info)
+
+	var runErr error
+	defer func() {
+		p.hook.OnPipelineEnd(ctx, info, runErr, time.Since(pipelineStart))
+	}()
+
+	readStart := time.Now()
+	p.hook.OnReadStart(ctx, info)
+
 	records, err := p.reader(ctx)
+	p.hook.OnReadEnd(ctx, info, len(records), err, time.Since(readStart))
+
 	if err != nil {
 		return fmt.Errorf("read failed: %w", err)
 	}
@@ -91,7 +118,12 @@ func (p *Pipeline) Run(ctx context.Context) error {
 		record := records[i]
 
 		for step, transform := range p.transforms {
+			stepStart := time.Now()
+			p.hook.OnTransformStart(ctx, info, step)
+
 			updatedRecord, err := transform(ctx, record)
+
+			p.hook.OnTransformEnd(ctx, info, step, err, time.Since(stepStart))
 			if err != nil {
 				return fmt.Errorf("transform[%d] failed: %w", step, err)
 			}
@@ -102,9 +134,16 @@ func (p *Pipeline) Run(ctx context.Context) error {
 		records[i] = record
 	}
 
-	if err := p.writer(ctx, records); err != nil {
+	writeStart := time.Now()
+	p.hook.OnWriteStart(ctx, info, len(records))
+
+	err = p.writer(ctx, records)
+
+	p.hook.OnWriteEnd(ctx, info, err, time.Since(writeStart))
+	if err != nil {
 		return fmt.Errorf("write failed: %w", err)
 	}
 
+	runErr = nil
 	return nil
 }

@@ -14,6 +14,8 @@ type Job struct {
 	Pipeline *Pipeline
 	Name     string
 
+	hook JobHook
+
 	StartedAt time.Time
 	EndedAt   time.Time
 	Err       error
@@ -29,7 +31,18 @@ func NewJob(pipeline *Pipeline) (*Job, error) {
 		ID:       newJobID(),
 		Pipeline: pipeline,
 		Name:     pipeline.Name(),
+		hook:     NoopJobHook{},
 	}, nil
+}
+
+// Hook sets the job hook. If nil is passed, a NoopJobHook is used.
+func (j *Job) Hook(h JobHook) *Job {
+	if h == nil {
+		j.hook = NoopJobHook{}
+	} else {
+		j.hook = h
+	}
+	return j
 }
 
 // Duration returns the duration if the job
@@ -50,15 +63,24 @@ func (j *Job) Run(ctx context.Context) error {
 	if j == nil {
 		return errors.New("job is nil")
 	}
-
 	if j.Pipeline == nil {
 		return errors.New("job pipeline is nil")
 	}
 
+	info := JobInfo{
+		JobID:        j.ID,
+		PipelineName: j.Pipeline.Name(),
+	}
+
 	j.StartedAt = time.Now()
+	j.hook.OnJobStart(ctx, info)
+
 	err := j.Pipeline.Run(ctx)
+
 	j.EndedAt = time.Now()
 	j.Err = err
+	j.hook.OnJobEnd(ctx, info, err, j.EndedAt.Sub(j.StartedAt))
+
 	return err
 }
 
