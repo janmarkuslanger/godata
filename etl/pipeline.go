@@ -21,10 +21,10 @@ type Writer func(ctx context.Context, records []Record) error
 
 // Pipeline defines a data pipeline: Read -> Transform* -> Write
 type Pipeline struct {
-	name       string
-	reader     Reader
-	transforms []Transform
-	writer     Writer
+	name   string
+	reader Reader
+	steps  []step
+	writer Writer
 
 	hook PipelineHook
 }
@@ -47,7 +47,13 @@ func (p *Pipeline) Read(reader Reader) *Pipeline {
 
 // Transform appends a tranformer
 func (p *Pipeline) Transform(transform Transform) *Pipeline {
-	p.transforms = append(p.transforms, transform)
+	p.steps = append(p.steps, transformStep{fn: transform})
+	return p
+}
+
+// Filter appends a filter step.
+func (p *Pipeline) Filter(predicate Predicate) *Pipeline {
+	p.steps = append(p.steps, filterStep{fn: predicate})
 	return p
 }
 
@@ -114,32 +120,41 @@ func (p *Pipeline) Run(ctx context.Context) error {
 		return runErr
 	}
 
-	// Transforms sequentially
+	// Apply steps sequentially; filter steps may drop records.
+	out := make([]Record, 0, len(records))
+
 	for i := range records {
 		record := records[i]
+		keep := true
 
-		for step, transform := range p.transforms {
+		for stepIdx, s := range p.steps {
 			stepStart := time.Now()
-			p.hook.OnTransformStart(ctx, info, step)
 
-			updatedRecord, err := transform(ctx, record)
+			p.hook.OnStepStart(ctx, info, stepIdx)
 
-			p.hook.OnTransformEnd(ctx, info, step, err, time.Since(stepStart))
+			var err error
+			record, keep, err = s.apply(ctx, record)
+
+			p.hook.OnStepEnd(ctx, info, stepIdx, err, time.Since(stepStart))
 			if err != nil {
-				runErr = fmt.Errorf("transform[%d] failed: %w", step, err)
+				runErr = fmt.Errorf("step[%d] failed: %w", stepIdx, err)
 				return runErr
 			}
 
-			record = updatedRecord
+			if !keep {
+				break
+			}
 		}
 
-		records[i] = record
+		if keep {
+			out = append(out, record)
+		}
 	}
 
 	writeStart := time.Now()
-	p.hook.OnWriteStart(ctx, info, len(records))
+	p.hook.OnWriteStart(ctx, info, len(out))
 
-	err = p.writer(ctx, records)
+	err = p.writer(ctx, out)
 
 	p.hook.OnWriteEnd(ctx, info, err, time.Since(writeStart))
 	if err != nil {
@@ -147,5 +162,6 @@ func (p *Pipeline) Run(ctx context.Context) error {
 		return runErr
 	}
 
+	runErr = nil
 	return nil
 }

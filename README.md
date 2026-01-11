@@ -35,7 +35,20 @@ Pipeline builder:
 - `(*Pipeline).Read(reader Reader) *Pipeline`: sets the reader.
 - `(*Pipeline).Transform(transform Transform) *Pipeline`: appends a transform.
 - `(*Pipeline).Write(writer Writer) *Pipeline`: sets the writer.
+- `(*Pipeline).Hook(hook PipelineHook) *Pipeline`: sets pipeline hooks (nil uses Noop).
 - `(*Pipeline).Run(ctx context.Context) error`: executes the pipeline.
+
+Jobs:
+- `NewJob(pipeline *Pipeline) (*Job, error)`: creates a job for a pipeline.
+- `(*Job).Hook(hook JobHook) *Job`: sets job hooks (nil uses Noop).
+- `(*Job).Run(ctx context.Context) error`: runs the job and stores timestamps/errors.
+- `(*Job).Duration() time.Duration`: returns the runtime based on start/end.
+- `Job` fields: `ID`, `Name`, `StartedAt`, `EndedAt`, `Err`.
+
+Hooks:
+- `PipelineHook`: lifecycle events for pipeline, read/transform/write steps.
+- `JobHook`: lifecycle events for job start/end.
+- `NoopPipelineHook` and `NoopJobHook` are provided for embedding.
 
 Error behavior:
 - read errors are wrapped as `read failed: ...`
@@ -71,8 +84,38 @@ func main() {
 			return nil
 		})
 
-	_ = p.Run(context.Background())
+_ = p.Run(context.Background())
 }
+```
+
+## Hooks (embedding pattern)
+
+```go
+type LoggingPipelineHook struct {
+	etl.NoopPipelineHook
+}
+
+func (LoggingPipelineHook) OnPipelineEnd(ctx context.Context, info etl.PipelineInfo, err error, dur time.Duration) {
+	// log or metrics here
+}
+
+type LoggingJobHook struct {
+	etl.NoopJobHook
+}
+
+func (LoggingJobHook) OnJobEnd(ctx context.Context, info etl.JobInfo, err error, dur time.Duration) {
+	// log or metrics here
+}
+```
+
+Use them like:
+
+```go
+pipeline := etl.New("demo").
+	Hook(&LoggingPipelineHook{})
+
+job, _ := etl.NewJob(pipeline)
+job.Hook(&LoggingJobHook{})
 ```
 
 ## Testing
