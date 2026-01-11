@@ -16,10 +16,10 @@ Local development:
 
 ## Packages
 
-- `etl`: ETL pipelines (Read -> Step* -> Write)
-- `scheduler`: schedule definitions (interval-based)
-- `runner`: concurrent job execution with status tracking
-- `orchestrator`: wiring of pipelines + schedules + persistence
+- `etl`: simple ETL-style pipeline (Read -> Step* -> Write)
+- `runner`: executes jobs asynchronously and keeps run results
+- `scheduler`: scheduling helpers (`Every`)
+- `orchestrator`: wires pipelines, schedules, and run persistence
 
 ## Design
 
@@ -123,7 +123,8 @@ Persistence:
 - `RunRecord`: `ID`, `PipelineName`, `JobID`, `Status`, `StartedAt`, `EndedAt`, `Error`.
 - `RunStatus`: `running`, `succeeded`, `failed`, `canceled`.
 
-## Deployment
+<details>
+<summary>Deployment</summary>
 
 This library can run as a simple in-process pipeline or as a long-running service with scheduling.
 
@@ -147,8 +148,10 @@ AWS (good fit for file-based persistence):
 - Send logs to stdout/stderr and use CloudWatch.
 
 Notes:
-- JSON/SQLite is single-instance friendly. For multiple instances or HA, use a shared database instead of a local file.
+- JSON/SQLite is single-instance friendly. For multiple instances, use a shared database instead of a local file.
 - If you do not want an always-on process, use an external scheduler and only keep `runner` + `orchestrator`.
+
+</details>
 
 ## Examples
 
@@ -358,6 +361,99 @@ func main() {
 	_ = orch.StartScheduler(context.Background())
 }
 ```
+
+<details>
+<summary>Tutorial: Hourly job</summary>
+
+Step 1: define your read/write helpers.
+
+```go
+func readOrders(ctx context.Context) ([]etl.Record, error) {
+	file, err := os.Open("data/orders.csv")
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	reader := csv.NewReader(file)
+	_, err = reader.Read() // skip header
+	if err != nil {
+		return nil, err
+	}
+
+	var records []etl.Record
+	for {
+		row, err := reader.Read()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return nil, err
+		}
+		if len(row) < 3 {
+			continue
+		}
+		records = append(records, etl.Record{
+			"order_id": row[0],
+			"amount":   row[1],
+			"status":   row[2],
+		})
+	}
+	return records, nil
+}
+
+func writeOrders(ctx context.Context, records []etl.Record) error {
+	file, err := os.OpenFile("out/paid_orders.jsonl", os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	enc := json.NewEncoder(file)
+	for _, record := range records {
+		if err := enc.Encode(record); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+```
+
+Step 2: build the pipeline.
+
+```go
+pipeline := etl.New("hourly-orders").
+	Read(readOrders).
+	Filter(func(ctx context.Context, record etl.Record) (bool, error) {
+		return record["status"] == "paid", nil
+	}).
+	Transform(func(ctx context.Context, record etl.Record) (etl.Record, error) {
+		record["processed_at"] = time.Now().UTC().Format(time.RFC3339)
+		return record, nil
+	}).
+	Write(writeOrders)
+```
+
+Step 3: schedule it to run every hour and keep the process alive.
+
+```go
+ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+defer stop()
+
+store := orchestrator.NewFileStore("state.json")
+orch := orchestrator.New(store, nil)
+
+if err := orch.Register(ctx, pipeline, scheduler.Every(time.Hour)); err != nil {
+	panic(err)
+}
+if err := orch.StartScheduler(ctx); err != nil {
+	panic(err)
+}
+
+<-ctx.Done()
+```
+
+</details>
 
 ## Testing
 
