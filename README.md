@@ -123,8 +123,10 @@ Persistence:
 - `RunRecord`: `ID`, `PipelineName`, `JobID`, `Status`, `StartedAt`, `EndedAt`, `Error`.
 - `RunStatus`: `running`, `succeeded`, `failed`, `canceled`.
 
+## Deployment
+
 <details>
-<summary>Deployment</summary>
+<summary>Show details</summary>
 
 This library can run as a simple in-process pipeline or as a long-running service with scheduling.
 
@@ -139,7 +141,7 @@ Always-on scheduling (internal scheduler):
 GCP (good fit for file-based persistence):
 - Use Compute Engine with a small VM and Persistent Disk.
 - Run the process via a systemd service (auto-start, restart on crash).
-- Store `state.json` or SQLite on the persistent disk.
+- Store `state.json` (FileStore) on the persistent disk.
 - Send logs to stdout/stderr and use Cloud Logging.
 
 AWS (good fit for file-based persistence):
@@ -148,7 +150,7 @@ AWS (good fit for file-based persistence):
 - Send logs to stdout/stderr and use CloudWatch.
 
 Notes:
-- JSON/SQLite is single-instance friendly. For multiple instances, use a shared database instead of a local file.
+- `FileStore` is single-instance friendly. For multiple instances, use a shared database instead of a local file.
 - If you do not want an always-on process, use an external scheduler and only keep `runner` + `orchestrator`.
 
 </details>
@@ -156,6 +158,9 @@ Notes:
 ## Examples
 
 ### ETL pipeline
+
+<details>
+<summary>Show details</summary>
 
 ```go
 package main
@@ -241,7 +246,12 @@ func main() {
 }
 ```
 
+</details>
+
 ### Hooks (embedding pattern)
+
+<details>
+<summary>Show details</summary>
 
 ```go
 type LoggingPipelineHook struct {
@@ -269,7 +279,12 @@ job, _ := etl.NewJob(pipeline)
 job.Hook(&LoggingJobHook{})
 ```
 
+</details>
+
 ### Scheduler + orchestrator
+
+<details>
+<summary>Show details</summary>
 
 ```go
 package main
@@ -362,8 +377,12 @@ func main() {
 }
 ```
 
+</details>
+
+## Tutorial: Hourly job
+
 <details>
-<summary>Tutorial: Hourly job</summary>
+<summary>Show details</summary>
 
 Step 1: define your read/write helpers.
 
