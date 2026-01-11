@@ -2,6 +2,7 @@ package runner_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -37,6 +38,17 @@ func TestRunnerStartAndResult(t *testing.T) {
 	}
 	if handle.JobName != job.Name {
 		t.Fatalf("expected job name %q, got %q", job.Name, handle.JobName)
+	}
+
+	result, ok := r.Result(handle.ID)
+	if !ok {
+		t.Fatalf("expected result to be available")
+	}
+	if result.Status != runner.StatusSucceeded {
+		t.Fatalf("expected status %q, got %q", runner.StatusSucceeded, result.Status)
+	}
+	if result.Err != nil {
+		t.Fatalf("expected no error, got %v", result.Err)
 	}
 }
 
@@ -87,5 +99,41 @@ func TestRunnerAllowsOverlapping(t *testing.T) {
 	case <-handleB.Done():
 	case <-time.After(2 * time.Second):
 		t.Fatalf("timeout waiting for handleB")
+	}
+}
+
+func TestRunnerResultFailure(t *testing.T) {
+	ctx := context.Background()
+
+	pipeline := etl.New("demo").
+		Read(func(ctx context.Context) ([]etl.Record, error) {
+			return nil, errors.New("read failed")
+		}).
+		Write(func(ctx context.Context, records []etl.Record) error {
+			return nil
+		})
+
+	job, err := etl.NewJob(pipeline)
+	if err != nil {
+		t.Fatalf("NewJob failed: %v", err)
+	}
+
+	r := runner.New()
+	handle, err := r.Start(ctx, job)
+	if err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+
+	<-handle.Done()
+
+	result, ok := r.Result(handle.ID)
+	if !ok {
+		t.Fatalf("expected result to be available")
+	}
+	if result.Status != runner.StatusFailed {
+		t.Fatalf("expected status %q, got %q", runner.StatusFailed, result.Status)
+	}
+	if result.Err == nil {
+		t.Fatalf("expected error to be set")
 	}
 }

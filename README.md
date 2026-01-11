@@ -90,11 +90,12 @@ Schedules:
 ### Package runner
 
 Errors:
-- `ErrRunnerNil`, `ErrJobNil`, `ErrRunNotFound`.
+- `ErrRunnerNil`, `ErrJobNil`.
 
 Runner:
 - `New() *Runner`: creates a runner.
 - `(*Runner).Start(ctx, job) (Handle, error)`: runs a job asynchronously.
+- `(*Runner).Result(id string) (Result, bool)`: returns the result for a completed run.
 
 Run types:
 - `Status`: `running`, `succeeded`, `failed`, `canceled`.

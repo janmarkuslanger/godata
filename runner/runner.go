@@ -76,6 +76,23 @@ func New() *Runner {
 	}
 }
 
+// Result returns the result for a completed run.
+func (r *Runner) Result(id string) (Result, bool) {
+	if r == nil {
+		return Result{}, false
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if r.results == nil {
+		return Result{}, false
+	}
+
+	result, ok := r.results[id]
+	return result, ok
+}
+
 // Start runs a job asynchronously and returns a handle.
 func (r *Runner) Start(ctx context.Context, job *etl.Job) (Handle, error) {
 	if r == nil {

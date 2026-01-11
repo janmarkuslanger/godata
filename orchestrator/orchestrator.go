@@ -191,13 +191,39 @@ func (o *Orchestrator) persistCompletion(name string, handle runner.Handle) {
 		ID:           handle.ID,
 		PipelineName: name,
 		JobID:        handle.JobID,
-		Status:       RunStatusSucceeded,
-		StartedAt:    handle.StartedAt,
-		EndedAt:      time.Now().UTC(),
+	}
+
+	if result, ok := o.runner.Result(handle.ID); ok {
+		record.Status = mapRunStatus(result.Status)
+		record.StartedAt = result.StartedAt
+		record.EndedAt = result.EndedAt
+		if result.Err != nil {
+			record.Error = result.Err.Error()
+		}
+	} else {
+		record.Status = RunStatusFailed
+		record.StartedAt = handle.StartedAt
+		record.EndedAt = time.Now().UTC()
+		record.Error = "run result not found"
 	}
 
 	ctx := context.Background()
 	if err := o.store.UpsertRun(ctx, record); err != nil {
 		_ = err
+	}
+}
+
+func mapRunStatus(status runner.Status) RunStatus {
+	switch status {
+	case runner.StatusSucceeded:
+		return RunStatusSucceeded
+	case runner.StatusFailed:
+		return RunStatusFailed
+	case runner.StatusCanceled:
+		return RunStatusCanceled
+	case runner.StatusRunning:
+		return RunStatusRunning
+	default:
+		return RunStatusFailed
 	}
 }
