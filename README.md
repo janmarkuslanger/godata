@@ -402,7 +402,30 @@ func main() {
 <details>
 <summary>Show details</summary>
 
-Step 1: define your read/write helpers.
+Scenario: every hour, export paid orders from CSV into JSONL and log timing stats
+so you can see how long the read/transform/write stages take.
+
+Step 1: add a small pipeline hook for metrics.
+
+```go
+type MetricsHook struct {
+	etl.NoopPipelineHook
+}
+
+func (MetricsHook) OnReadEnd(ctx context.Context, info etl.PipelineInfo, records int, err error, dur time.Duration) {
+	log.Printf("[%s] read %d records in %s (err=%v)", info.PipelineName, records, dur, err)
+}
+
+func (MetricsHook) OnWriteEnd(ctx context.Context, info etl.PipelineInfo, err error, dur time.Duration) {
+	log.Printf("[%s] write finished in %s (err=%v)", info.PipelineName, dur, err)
+}
+
+func (MetricsHook) OnPipelineEnd(ctx context.Context, info etl.PipelineInfo, err error, dur time.Duration) {
+	log.Printf("[%s] pipeline done in %s (err=%v)", info.PipelineName, dur, err)
+}
+```
+
+Step 2: define your read/write helpers.
 
 ```go
 func readOrders(ctx context.Context) ([]etl.Record, error) {
@@ -430,9 +453,15 @@ func readOrders(ctx context.Context) ([]etl.Record, error) {
 		if len(row) < 3 {
 			continue
 		}
+
+		amount, err := strconv.ParseFloat(row[1], 64)
+		if err != nil {
+			continue
+		}
+
 		records = append(records, etl.Record{
 			"order_id": row[0],
-			"amount":   row[1],
+			"amount":   amount,
 			"status":   row[2],
 		})
 	}
@@ -456,7 +485,7 @@ func writeOrders(ctx context.Context, records []etl.Record) error {
 }
 ```
 
-Step 2: build the pipeline.
+Step 3: build the pipeline and attach the hook.
 
 ```go
 pipeline := etl.New("hourly-orders").
@@ -465,13 +494,16 @@ pipeline := etl.New("hourly-orders").
 		return record["status"] == "paid", nil
 	}).
 	Transform(func(ctx context.Context, record etl.Record) (etl.Record, error) {
+		amount := record["amount"].(float64)
+		record["gross"] = amount * 1.19
 		record["processed_at"] = time.Now().UTC().Format(time.RFC3339)
 		return record, nil
 	}).
-	Write(writeOrders)
+	Write(writeOrders).
+	Hook(&MetricsHook{})
 ```
 
-Step 3: schedule it to run every hour and keep the process alive.
+Step 4: schedule it to run every hour and keep the process alive.
 
 ```go
 ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
