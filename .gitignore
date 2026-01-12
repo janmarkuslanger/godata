@@ -31,5 +31,8 @@ go.work.sum
 .gocache/
 
 # Editor/IDE
-# .idea/
-# .vscode/
+.idea/
+.vscode/
+
+# tmp dir
+tmp/

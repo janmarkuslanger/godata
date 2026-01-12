@@ -5,6 +5,8 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
+	"fmt"
+	"runtime/debug"
 	"sync"
 	"time"
 
@@ -139,30 +141,38 @@ func (r *Runner) Start(ctx context.Context, job *etl.Job) (Handle, error) {
 }
 
 func (r *Runner) run(id string, ctx context.Context, job *etl.Job, state *runState) {
-	err := job.Run(ctx)
-	endedAt := time.Now().UTC()
-	status := statusFromErr(err)
+	var err error
+	defer func() {
+		if rec := recover(); rec != nil {
+			err = fmt.Errorf("panic: %v\n%s", rec, debug.Stack())
+		}
 
-	result := Result{
-		ID:        id,
-		JobID:     job.ID,
-		JobName:   job.Name,
-		Status:    status,
-		StartedAt: state.startedAt,
-		EndedAt:   endedAt,
-		Err:       err,
-	}
+		endedAt := time.Now().UTC()
+		status := statusFromErr(err)
 
-	r.mu.Lock()
-	delete(r.runs, id)
-	if r.results == nil {
-		r.results = make(map[string]Result)
-	}
-	r.results[id] = result
-	done := state.done
-	r.mu.Unlock()
+		result := Result{
+			ID:        id,
+			JobID:     job.ID,
+			JobName:   job.Name,
+			Status:    status,
+			StartedAt: state.startedAt,
+			EndedAt:   endedAt,
+			Err:       err,
+		}
 
-	close(done)
+		r.mu.Lock()
+		delete(r.runs, id)
+		if r.results == nil {
+			r.results = make(map[string]Result)
+		}
+		r.results[id] = result
+		done := state.done
+		r.mu.Unlock()
+
+		close(done)
+	}()
+
+	err = job.Run(ctx)
 }
 
 func statusFromErr(err error) Status {

@@ -3,6 +3,7 @@ package runner_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -135,5 +136,44 @@ func TestRunnerResultFailure(t *testing.T) {
 	}
 	if result.Err == nil {
 		t.Fatalf("expected error to be set")
+	}
+}
+
+func TestRunnerRecoversFromPanic(t *testing.T) {
+	ctx := context.Background()
+
+	pipeline := etl.New("panic").
+		Read(func(ctx context.Context) ([]etl.Record, error) {
+			return []etl.Record{{"value": 1}}, nil
+		}).
+		Write(func(ctx context.Context, records []etl.Record) error {
+			panic("boom")
+		})
+
+	job, err := etl.NewJob(pipeline)
+	if err != nil {
+		t.Fatalf("NewJob failed: %v", err)
+	}
+
+	r := runner.New()
+	handle, err := r.Start(ctx, job)
+	if err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+
+	<-handle.Done()
+
+	result, ok := r.Result(handle.ID)
+	if !ok {
+		t.Fatalf("expected result to be available")
+	}
+	if result.Status != runner.StatusFailed {
+		t.Fatalf("expected status %q, got %q", runner.StatusFailed, result.Status)
+	}
+	if result.Err == nil {
+		t.Fatalf("expected error to be set")
+	}
+	if !strings.Contains(result.Err.Error(), "panic") {
+		t.Fatalf("expected panic to be reported, got %v", result.Err)
 	}
 }
