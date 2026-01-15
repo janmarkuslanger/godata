@@ -1,6 +1,15 @@
-# godata
+<p align="center"><img src="/logo.svg" alt="Logo" width="200" /></p>
 
-Lightweight Go framework for small data pipelines. It focuses on simple ETL building blocks and a small orchestration layer for scheduling and running jobs.
+<p align="center">Lightweight Go framework for small data pipelines. It focuses on simple ETL building blocks and a small orchestration layer for scheduling and running jobs.</p>
+
+<p align="center">
+  <a href="https://goreportcard.com/report/github.com/janmarkuslanger/godata"><img src="https://goreportcard.com/badge/github.com/janmarkuslanger/godata" alt="Go Report"></a>
+  <a href="https://github.com/janmarkuslanger/godata/releases"><img src="https://img.shields.io/github/release/janmarkuslanger/godata" alt="Latest Release"></a>
+  <a href="https://github.com/janmarkuslanger/godata/actions"><img src="https://github.com/janmarkuslanger/godata/actions/workflows/ci.yml/badge.svg" alt="Build Status"></a>
+  <a href="https://github.com/janmarkuslanger/ssgo/archive/refs/heads/main.zip"><img src="https://img.shields.io/badge/Download-ZIP-blue" alt="Download ZIP"></a>
+</p>
+
+---
 
 ## Setup
 
