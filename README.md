@@ -1,4 +1,4 @@
-<p align="center"><img src="/logo.svg" alt="Logo" width="200" /></p>
+<p align="center"><img src="/logo.svg" alt="Logo" width="250" /></p>
 
 <p align="center">Lightweight Go framework for small data pipelines. It focuses on simple ETL building blocks and a small orchestration layer for scheduling and running jobs.</p>
 
