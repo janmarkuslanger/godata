@@ -45,15 +45,15 @@ How the pieces fit:
 3) Use `scheduler.Schedule` to compute future run times.
 4) Use `orchestrator.Orchestrator` to register pipelines, start schedules, and persist run metadata.
 
-Component wiring:
+Building blocks:
 
 ```mermaid
 flowchart LR
   U[User code] --> P[etl.Pipeline]
   P --> J[etl.Job]
   U -->|Register + schedule| O[orchestrator.Orchestrator]
-  S[scheduler.Schedule] -->|Next()| O
-  O -->|Start()| R[runner.Runner]
+  S["scheduler.Schedule"] -->|Next| O
+  O -->|Start| R[runner.Runner]
   R -->|executes| J
   O -->|UpsertRun| Store[(orchestrator.Store)]
 ```
