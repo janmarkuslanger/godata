@@ -53,6 +53,6 @@ func main() {
 		log.Fatal(err)
 	}
 
-	log.Printf("scheduler running (09:00 and 17:00 local time)")
+	log.Printf("scheduler running (15:15 and 17:00 local time)")
 	<-ctx.Done()
 }
