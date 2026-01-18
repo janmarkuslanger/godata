@@ -97,10 +97,52 @@ Core types:
 Schedules:
 - `Interval`: fixed-duration schedule.
 - `Every(d time.Duration) Interval`: helper to build an interval schedule.
+- `DailyAt`: run at specific times of day (optionally constrained to weekdays).
+- `Multi`: combine multiple schedules and run at the earliest next time.
 
 Behavior:
 - `Interval.Next` returns `time.Time{}` when `Every <= 0`.
 - Returning `time.Time{}` from `Next` stops scheduling.
+`DailyAt` details:
+- `Times` is a list of `ClockTime{Hour, Minute}` entries (e.g. 02:00 and 14:30).
+- `Weekdays` is optional; if set, only those days are eligible.
+- `Location` defaults to `time.Local` when nil.
+- `Weekdays` applies to all `Times`. Use `Multi` if you need different weekday rules per time.
+
+Examples:
+
+```go
+// Every night at 02:00 (local time).
+schedule := scheduler.DailyAt{
+	Times: []scheduler.ClockTime{
+		{Hour: 2, Minute: 0},
+	},
+	Location: time.Local,
+}
+```
+
+```go
+// Every night at 03:00 and every Monday at 07:00 (local time).
+schedule := scheduler.Multi{
+	Schedules: []scheduler.Schedule{
+		scheduler.DailyAt{
+			Times: []scheduler.ClockTime{
+				{Hour: 3, Minute: 0},
+			},
+			Location: time.Local,
+		},
+		scheduler.DailyAt{
+			Times: []scheduler.ClockTime{
+				{Hour: 7, Minute: 0},
+			},
+			Weekdays: []time.Weekday{time.Monday},
+			Location: time.Local,
+		},
+	},
+}
+```
+
+Note: `DailyAt` does not support monthly rules; for "every month at 07:00" use an external scheduler or a custom `Schedule`.
 
 ### Package runner
 
@@ -541,7 +583,14 @@ defer stop()
 store := orchestrator.NewFileStore("state.json")
 orch := orchestrator.New(store, r)
 
-if err := orch.Register(ctx, pipeline, scheduler.Every(24*time.Hour)); err != nil {
+schedule := scheduler.DailyAt{
+	Times: []scheduler.ClockTime{
+		{Hour: 2, Minute: 0},
+	},
+	Location: time.Local,
+}
+
+if err := orch.Register(ctx, pipeline, schedule); err != nil {
 	panic(err)
 }
 if err := orch.StartScheduler(ctx); err != nil {
@@ -551,7 +600,7 @@ if err := orch.StartScheduler(ctx); err != nil {
 <-ctx.Done()
 ```
 
-Note: `scheduler.Every(24*time.Hour)` runs on a fixed interval from process start. If you need an exact midnight schedule, start the service at the desired time or use an external scheduler that triggers `RunPipeline`.
+Note: `DailyAt` schedules by wall-clock time in the given location. Add more entries to `Times` to run multiple times per day. For cron-style expressions or advanced policies, prefer an external scheduler that triggers `RunPipeline`.
 
 </details>
 
