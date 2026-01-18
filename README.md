@@ -25,17 +25,43 @@ Local development:
 
 ## Packages
 
-- `etl`: simple ETL-style pipeline (Read -> Step* -> Write)
-- `runner`: executes jobs asynchronously and keeps run results
-- `scheduler`: scheduling helpers (`Every`)
-- `orchestrator`: wires pipelines, schedules, and run persistence
+- `etl`: core pipeline primitives (Read -> Step* -> Write) plus hooks and `Job` metadata. No scheduling or concurrency.
+- `runner`: executes `etl.Job` asynchronously and keeps run results in memory. No persistence, no scheduling.
+- `scheduler`: pure scheduling primitives; computes the next run time.
+- `orchestrator`: wires pipelines, schedules, runner, and optional persistence.
 
 ## Design
 
 - Small, focused packages so you can use only what you need.
-- Steps are explicit; filters can drop records, hooks expose lifecycle events.
-- Scheduling/execution are opt-in; nothing runs in the background unless you start it.
-- File persistence is meant for a single instance; for multiple instances, use a shared database instead of local files.
+- Pipeline execution is explicit; hooks expose lifecycle events for logging/metrics.
+- Scheduling and background execution are opt-in; nothing runs until you start it.
+- Persistence is optional; the built-in file store targets single-instance use.
+
+## Architecture
+
+How the pieces fit:
+1) Build an `etl.Pipeline` and wrap it in an `etl.Job`.
+2) Use `runner.Runner` to execute jobs asynchronously.
+3) Use `scheduler.Schedule` to compute future run times.
+4) Use `orchestrator.Orchestrator` to register pipelines, start schedules, and persist run metadata.
+
+Component wiring:
+
+```mermaid
+flowchart LR
+  U[User code] --> P[etl.Pipeline]
+  P --> J[etl.Job]
+  U -->|Register + schedule| O[orchestrator.Orchestrator]
+  S[scheduler.Schedule] -->|Next()| O
+  O -->|Start()| R[runner.Runner]
+  R -->|executes| J
+  O -->|UpsertRun| Store[(orchestrator.Store)]
+```
+
+Notes:
+- `orchestrator.StartScheduler` starts one goroutine per scheduled pipeline; cancel the context to stop.
+- `runner` allows overlapping runs; if you need exclusivity, enforce it in your pipeline or schedule.
+- `scheduler.Schedule.Next` returning `time.Time{}` stops scheduling for that pipeline.
 
 ## API Reference
 
