@@ -406,122 +406,142 @@ func main() {
 
 </details>
 
-## Tutorial: Hourly job
+## Tutorial: Nightly inventory load
 
 <details>
 <summary>Show details</summary>
 
-Scenario: every hour, export paid orders from CSV into JSONL and log timing stats
-so you can see how long the read/transform/write stages take.
+Scenario: once per night, load inventory items from a client into a database.
 
-Step 1: add a small pipeline hook for metrics.
+Step 1: define the pipeline (ETL).
 
 ```go
-type MetricsHook struct {
+type ClientItem struct {
+	SKU       string
+	Quantity  int
+	UpdatedAt time.Time
+}
+
+type DurationHook struct {
 	etl.NoopPipelineHook
 }
 
-func (MetricsHook) OnReadEnd(ctx context.Context, info etl.PipelineInfo, records int, err error, dur time.Duration) {
-	log.Printf("[%s] read %d records in %s (err=%v)", info.PipelineName, records, dur, err)
+func (DurationHook) OnPipelineEnd(ctx context.Context, info etl.PipelineInfo, err error, dur time.Duration) {
+	log.Printf("[%s] done in %s (err=%v)", info.PipelineName, dur, err)
 }
 
-func (MetricsHook) OnWriteEnd(ctx context.Context, info etl.PipelineInfo, err error, dur time.Duration) {
-	log.Printf("[%s] write finished in %s (err=%v)", info.PipelineName, dur, err)
+func fetchClientInventory(ctx context.Context, clientID string) ([]ClientItem, error) {
+	// call client API or read from a file; return a batch of items
+	return nil, nil
 }
 
-func (MetricsHook) OnPipelineEnd(ctx context.Context, info etl.PipelineInfo, err error, dur time.Duration) {
-	log.Printf("[%s] pipeline done in %s (err=%v)", info.PipelineName, dur, err)
-}
-```
-
-Step 2: define your read/write helpers.
-
-```go
-func readOrders(ctx context.Context) ([]etl.Record, error) {
-	file, err := os.Open("data/orders.csv")
-	if err != nil {
-		return nil, err
-	}
-	defer file.Close()
-
-	reader := csv.NewReader(file)
-	_, err = reader.Read() // skip header
-	if err != nil {
-		return nil, err
-	}
-
-	var records []etl.Record
-	for {
-		row, err := reader.Read()
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			return nil, err
-		}
-		if len(row) < 3 {
-			continue
-		}
-
-		amount, err := strconv.ParseFloat(row[1], 64)
-		if err != nil {
-			continue
-		}
-
-		records = append(records, etl.Record{
-			"order_id": row[0],
-			"amount":   amount,
-			"status":   row[2],
-		})
-	}
-	return records, nil
-}
-
-func writeOrders(ctx context.Context, records []etl.Record) error {
-	file, err := os.OpenFile("out/paid_orders.jsonl", os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+func writeInventory(ctx context.Context, db *sql.DB, records []etl.Record) error {
+	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
-	defer file.Close()
+	defer tx.Rollback()
 
-	enc := json.NewEncoder(file)
+	stmt, err := tx.PrepareContext(ctx, `
+		INSERT INTO inventory (client_id, sku, quantity, updated_at)
+		VALUES ($1, $2, $3, $4)
+		ON CONFLICT (client_id, sku) DO UPDATE
+		SET quantity = EXCLUDED.quantity, updated_at = EXCLUDED.updated_at
+	`)
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+
 	for _, record := range records {
-		if err := enc.Encode(record); err != nil {
+		if _, err := stmt.ExecContext(
+			ctx,
+			record["client_id"],
+			record["sku"],
+			record["quantity"],
+			record["updated_at"],
+		); err != nil {
 			return err
 		}
 	}
-	return nil
+
+	return tx.Commit()
+}
+
+func buildInventoryPipeline(db *sql.DB, clientID string) *etl.Pipeline {
+	return etl.New("nightly-inventory").
+		Hook(&DurationHook{}).
+		Read(func(ctx context.Context) ([]etl.Record, error) {
+			items, err := fetchClientInventory(ctx, clientID)
+			if err != nil {
+				return nil, err
+			}
+
+			records := make([]etl.Record, 0, len(items))
+			for _, item := range items {
+				records = append(records, etl.Record{
+					"client_id":  clientID,
+					"sku":        item.SKU,
+					"quantity":   item.Quantity,
+					"updated_at": item.UpdatedAt.UTC(),
+				})
+			}
+
+			return records, nil
+		}).
+		Transform(func(ctx context.Context, record etl.Record) (etl.Record, error) {
+			if record["quantity"].(int) < 0 {
+				record["quantity"] = 0
+			}
+			record["loaded_at"] = time.Now().UTC()
+			return record, nil
+		}).
+		Write(func(ctx context.Context, records []etl.Record) error {
+			return writeInventory(ctx, db, records)
+		})
 }
 ```
 
-Step 3: build the pipeline and attach the hook.
+Step 2: run a one-off import with runner (useful for backfills).
 
 ```go
-pipeline := etl.New("hourly-orders").
-	Read(readOrders).
-	Filter(func(ctx context.Context, record etl.Record) (bool, error) {
-		return record["status"] == "paid", nil
-	}).
-	Transform(func(ctx context.Context, record etl.Record) (etl.Record, error) {
-		amount := record["amount"].(float64)
-		record["gross"] = amount * 1.19
-		record["processed_at"] = time.Now().UTC().Format(time.RFC3339)
-		return record, nil
-	}).
-	Write(writeOrders).
-	Hook(&MetricsHook{})
+ctx := context.Background()
+
+db, err := sql.Open("postgres", os.Getenv("DB_DSN"))
+if err != nil {
+	panic(err)
+}
+defer db.Close()
+
+pipeline := buildInventoryPipeline(db, "client-42")
+
+r := runner.New()
+job, err := etl.NewJob(pipeline)
+if err != nil {
+	panic(err)
+}
+
+handle, err := r.Start(ctx, job)
+if err != nil {
+	panic(err)
+}
+
+<-handle.Done()
+if result, ok := r.Result(handle.ID); ok {
+	log.Printf("run=%s status=%s err=%v", result.ID, result.Status, result.Err)
+}
 ```
 
-Step 4: schedule it to run every hour and keep the process alive.
+Step 3: schedule nightly runs with orchestrator + scheduler.
 
 ```go
 ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 defer stop()
 
 store := orchestrator.NewFileStore("state.json")
-orch := orchestrator.New(store, nil)
+orch := orchestrator.New(store, r)
 
-if err := orch.Register(ctx, pipeline, scheduler.Every(time.Hour)); err != nil {
+if err := orch.Register(ctx, pipeline, scheduler.Every(24*time.Hour)); err != nil {
 	panic(err)
 }
 if err := orch.StartScheduler(ctx); err != nil {
@@ -530,6 +550,8 @@ if err := orch.StartScheduler(ctx); err != nil {
 
 <-ctx.Done()
 ```
+
+Note: `scheduler.Every(24*time.Hour)` runs on a fixed interval from process start. If you need an exact midnight schedule, start the service at the desired time or use an external scheduler that triggers `RunPipeline`.
 
 </details>
 
